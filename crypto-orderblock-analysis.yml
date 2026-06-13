@@ -1,0 +1,28 @@
+name: 訂單塊熱門幣自動分析
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'   # 每4小時執行一次 (可改成 */1 變成每小時)
+  workflow_dispatch:        # 允許手動點擊執行
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 拉取最新程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安裝依賴套件
+        run: |
+          pip install ccxt pandas requests python-dotenv
+
+      - name: 執行訂單塊分析
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python main.py
