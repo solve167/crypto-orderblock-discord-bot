@@ -1,0 +1,7 @@
+ccxt>=4.0.0
+pandas
+pandas_ta
+requests
+python-dotenv
+schedule
+matplotlib
