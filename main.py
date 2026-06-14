@@ -19,10 +19,10 @@ def send_to_discord(message: str):
     except Exception as e:
         print(f"推播失敗: {e}")
 
-# 使用 Bybit (解決地區限制)
-def fetch_data(symbol, timeframe, limit=500):
+# 使用 OKX (較少地區限制)
+def fetch_data(symbol, timeframe, limit=400):
     try:
-        exchange = ccxt.bybit({
+        exchange = ccxt.okx({
             'enableRateLimit': True,
         })
         bars = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
@@ -31,66 +31,66 @@ def fetch_data(symbol, timeframe, limit=500):
         print(f"✅ {symbol} {timeframe} 抓取成功")
         return df
     except Exception as e:
-        print(f"❌ {symbol} {timeframe} 抓取失敗: {e}")
+        print(f"❌ {symbol} {timeframe} 抓取失敗: {str(e)[:100]}")
         return None
 
 def detect_orderblock(df):
-    if df is None or len(df) < 50:
+    if df is None or len(df) < 40:
         return None
     
     current_price = float(df['close'].iloc[-1])
-    lookback = 20
+    lookback = 18
     
     high_idx = df['high'].iloc[-lookback:].idxmax()
     low_idx = df['low'].iloc[-lookback:].idxmin()
     
-    # 放寬版做多
+    # 做多邏輯
     if current_price > df['low'].iloc[-lookback:].mean() * 1.008:
         ob_low = float(df['low'].iloc[low_idx])
-        risk_dist = (current_price - ob_low) * 1.12
+        risk_dist = (current_price - ob_low) * 1.15
         return {
             "direction": "多",
             "entry": round(current_price, 4),
-            "sl": round(ob_low * 0.975, 4),
+            "sl": round(ob_low * 0.97, 4),
             "tp1": round(current_price + risk_dist * 0.618, 4),
             "tp2": round(current_price + risk_dist * 1.0, 4),
             "tp3": round(current_price + risk_dist * 1.618, 4),
         }
     
-    # 放寬版做空
+    # 做空邏輯
     elif current_price < df['high'].iloc[-lookback:].mean() * 0.992:
         ob_high = float(df['high'].iloc[high_idx])
-        risk_dist = (ob_high - current_price) * 1.12
+        risk_dist = (ob_high - current_price) * 1.15
         return {
             "direction": "空",
             "entry": round(current_price, 4),
-            "sl": round(ob_high * 1.025, 4),
+            "sl": round(ob_high * 1.03, 4),
             "tp1": round(current_price - risk_dist * 0.618, 4),
             "tp2": round(current_price - risk_dist * 1.0, 4),
             "tp3": round(current_price - risk_dist * 1.618, 4),
         }
     return None
 
-def get_top_coins(limit=12):
+def get_top_coins(limit=10):
     try:
-        exchange = ccxt.bybit()
+        exchange = ccxt.okx()
         tickers = exchange.fetch_tickers()
         coins = []
         for symbol, info in tickers.items():
-            if symbol.endswith('/USDT') and not symbol.startswith(('USDT', 'USDC')):
+            if symbol.endswith('/USDT') and not symbol.startswith(('USDT','USDC')):
                 vol = info.get('quoteVolume') or info.get('volume') or 0
-                if vol > 20000000:
+                if vol > 15000000:
                     coins.append({'symbol': symbol, 'volume': vol})
         coins.sort(key=lambda x: x['volume'], reverse=True)
         return [c['symbol'] for c in coins[:limit]]
     except:
-        return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'XAU/USDT']
+        return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT']
 
 if __name__ == "__main__":
-    print("🚀 訂單塊熱門幣自動分析啟動 (Bybit版)...")
+    print("🚀 訂單塊熱門幣自動分析 (OKX版)...")
     timeframes = ['4h', '8h', '12h', '1d', '1M']
     top_symbols = get_top_coins()
-    print(f"熱門幣: {top_symbols[:10]}...")
+    print(f"熱門幣: {top_symbols[:8]}...")
     
     all_signals = []
     
@@ -111,8 +111,7 @@ if __name__ == "__main__":
         if max_count < 3:
             continue
         
-        title_map = {5: "多他媽" if direction_count.get("多",0)==5 else "空他媽",
-                     4: "多多" if direction_count.get("多",0)>=4 else "空空",
+        title_map = {5: "多他媽", 4: "多多" if direction_count.get("多",0) >=4 else "空空", 
                      3: "可多" if direction_count.get("多",0)==3 else "可空"}
         title = title_map.get(max_count, "可多")
         
