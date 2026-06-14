@@ -167,7 +167,7 @@ if __name__ == "__main__":
 📊 **多TF共振**：{sig['count']}/5 個時間框架同意 {sig['direction']}
 📍 **交易方向**：**{sig['direction']}**
 💰 **入場參考**：{sig['entry']}
-🛡️ **止損**：{sig['sl']} (ICT ±2%)
+🛡️ **止損**：{sig['sl']} (ICT ±1.5%)
 🎯 **止盈目標**
 TP1: {sig['tp1']}
 TP2: {sig['tp2']}
