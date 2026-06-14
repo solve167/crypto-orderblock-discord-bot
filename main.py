@@ -19,12 +19,16 @@ def send_to_discord(message: str):
     except Exception as e:
         print(f"推播失敗: {e}")
 
+# 使用 Bybit (解決地區限制)
 def fetch_data(symbol, timeframe, limit=500):
     try:
-        exchange = ccxt.binance()
+        exchange = ccxt.bybit({
+            'enableRateLimit': True,
+        })
         bars = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        print(f"✅ {symbol} {timeframe} 抓取成功")
         return df
     except Exception as e:
         print(f"❌ {symbol} {timeframe} 抓取失敗: {e}")
@@ -40,10 +44,10 @@ def detect_orderblock(df):
     high_idx = df['high'].iloc[-lookback:].idxmax()
     low_idx = df['low'].iloc[-lookback:].idxmin()
     
-    # 放寬做多邏輯
+    # 放寬版做多
     if current_price > df['low'].iloc[-lookback:].mean() * 1.008:
         ob_low = float(df['low'].iloc[low_idx])
-        risk_dist = (current_price - ob_low) * 1.1
+        risk_dist = (current_price - ob_low) * 1.12
         return {
             "direction": "多",
             "entry": round(current_price, 4),
@@ -53,10 +57,10 @@ def detect_orderblock(df):
             "tp3": round(current_price + risk_dist * 1.618, 4),
         }
     
-    # 放寬做空邏輯
+    # 放寬版做空
     elif current_price < df['high'].iloc[-lookback:].mean() * 0.992:
         ob_high = float(df['high'].iloc[high_idx])
-        risk_dist = (ob_high - current_price) * 1.1
+        risk_dist = (ob_high - current_price) * 1.12
         return {
             "direction": "空",
             "entry": round(current_price, 4),
@@ -69,24 +73,24 @@ def detect_orderblock(df):
 
 def get_top_coins(limit=12):
     try:
-        exchange = ccxt.binance()
+        exchange = ccxt.bybit()
         tickers = exchange.fetch_tickers()
         coins = []
         for symbol, info in tickers.items():
-            if symbol.endswith('/USDT') and not symbol.startswith(('USDT', 'USDC', 'BUSD')):
-                vol = info.get('quoteVolume') or 0
-                if vol > 30000000:   # 降低門檻
+            if symbol.endswith('/USDT') and not symbol.startswith(('USDT', 'USDC')):
+                vol = info.get('quoteVolume') or info.get('volume') or 0
+                if vol > 20000000:
                     coins.append({'symbol': symbol, 'volume': vol})
         coins.sort(key=lambda x: x['volume'], reverse=True)
         return [c['symbol'] for c in coins[:limit]]
     except:
-        return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT']
+        return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'XAU/USDT']
 
 if __name__ == "__main__":
-    print("🚀 訂單塊熱門幣自動分析啟動...")
+    print("🚀 訂單塊熱門幣自動分析啟動 (Bybit版)...")
     timeframes = ['4h', '8h', '12h', '1d', '1M']
     top_symbols = get_top_coins()
-    print(f"熱門幣: {top_symbols[:8]}...")
+    print(f"熱門幣: {top_symbols[:10]}...")
     
     all_signals = []
     
@@ -103,16 +107,16 @@ if __name__ == "__main__":
                     direction_count[signal["direction"]] += 1
                     print(f"  {symbol} {tf} → {signal['direction']}")
         
-        max_count = max(direction_count.values())
+        max_count = max(direction_count.values()) if direction_count else 0
         if max_count < 3:
             continue
         
-        title_map = {5: "多他媽" if direction_count["多"]==5 else "空他媽",
-                     4: "多多" if direction_count["多"]>=4 else "空空",
-                     3: "可多" if direction_count["多"]==3 else "可空"}
+        title_map = {5: "多他媽" if direction_count.get("多",0)==5 else "空他媽",
+                     4: "多多" if direction_count.get("多",0)>=4 else "空空",
+                     3: "可多" if direction_count.get("多",0)==3 else "可空"}
         title = title_map.get(max_count, "可多")
         
-        main_dir = "多" if direction_count["多"] >= direction_count["空"] else "空"
+        main_dir = "多" if direction_count.get("多",0) >= direction_count.get("空",0) else "空"
         latest = signals[-1]
         
         all_signals.append({
@@ -152,4 +156,6 @@ TP3: {sig['tp3']}
 ---
 """
             send_to_discord(msg.strip())
-            print(f"已發送 {sig['title']} {sig['symbol']}")
+            print(f"✅ 已發送 {sig['title']} {sig['symbol']}")
+    
+    print("🎉 本輪分析完成！")
