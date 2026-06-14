@@ -172,6 +172,7 @@ if __name__ == "__main__":
 TP1: {sig['tp1']}
 TP2: {sig['tp2']}
 TP3: {sig['tp3']}
+僅提供參考，不構成投資建議。
 ---
 """
             send_to_discord(msg.strip())
