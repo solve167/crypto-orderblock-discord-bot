@@ -33,22 +33,25 @@ def detect_orderblock(df):
         return None
    
     current_price = float(df['close'].iloc[-1])
-    lookback = 20
+    lookback = 22
     atr = calculate_atr(df)
     if atr is None or atr <= 0:
-        atr = current_price * 0.018  # 預設 1.8%
+        atr = current_price * 0.02
     
     recent_high = float(df['high'].iloc[-lookback:].max())
     recent_low = float(df['low'].iloc[-lookback:].min())
     mean_high = float(df['high'].iloc[-lookback:].mean())
     mean_low = float(df['low'].iloc[-lookback:].mean())
 
-    # === 做多邏輯（強化保護）===
-    if current_price > mean_low * 1.015 and current_price > recent_low * 1.008:
-        ob_low = recent_low
-        risk_dist = max((current_price - ob_low) * 1.12, atr * 1.8)
+    # === 做多邏輯（大幅強化）===
+    if (current_price > mean_low * 1.018 and 
+        current_price > recent_low * 1.012 and 
+        current_price > mean_high * 0.985):  # 確保處於相對低位
         
-        sl = round(ob_low * 0.972, 4)                    # SL 在 OB 下方
+        ob_low = recent_low
+        risk_dist = max((current_price - ob_low) * 1.08, atr * 2.0)
+        
+        sl = round(ob_low * 0.965, 4)   # SL 在 OB 下方
         tp1 = round(current_price + risk_dist * 0.618, 4)
         tp2 = round(current_price + risk_dist * 1.0, 4)
         tp3 = round(current_price + risk_dist * 1.618, 4)
@@ -62,17 +65,19 @@ def detect_orderblock(df):
             "tp3": tp3,
         }
     
-    # === 做空邏輯（強化保護）===
-    elif current_price < mean_high * 0.985 and current_price < recent_high * 0.992:
+    # === 做空邏輯（大幅強化）===
+    elif (current_price < mean_high * 0.982 and 
+          current_price < recent_high * 0.988 and 
+          current_price < mean_low * 1.015):
+        
         ob_high = recent_high
-        risk_dist = max((ob_high - current_price) * 1.12, atr * 1.8)
+        risk_dist = max((ob_high - current_price) * 1.08, atr * 2.0)
         
-        sl = round(ob_high * 1.028, 4)                   # SL 在 OB 上方
+        sl = round(ob_high * 1.035, 4)   # SL 在 OB 上方
         
-        # 強力防止 TP 跑到錯誤方向
-        tp1 = min(current_price - risk_dist * 0.618, current_price * 0.85)
-        tp2 = min(current_price - risk_dist * 1.0, current_price * 0.65)
-        tp3 = min(current_price - risk_dist * 1.618, current_price * 0.45)
+        tp1 = max(current_price - risk_dist * 0.618, current_price * 0.78)
+        tp2 = max(current_price - risk_dist * 1.0, current_price * 0.60)
+        tp3 = max(current_price - risk_dist * 1.618, current_price * 0.40)
         
         return {
             "direction": "空",
@@ -93,7 +98,7 @@ def get_top_coins(limit=10):
         for symbol, info in tickers.items():
             if symbol.endswith('/USDT') and not symbol.startswith(('USDT','USDC')):
                 vol = info.get('quoteVolume') or info.get('volume') or 0
-                if vol > 12000000:   # 稍微降低門檻
+                if vol > 15000000:
                     coins.append({'symbol': symbol, 'volume': vol})
         coins.sort(key=lambda x: x['volume'], reverse=True)
         return [c['symbol'] for c in coins[:limit]]
@@ -101,8 +106,8 @@ def get_top_coins(limit=10):
         return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'HYPE/USDT', 'DOGE/USDT', 'WLD/USDT']
 
 if __name__ == "__main__":
-    print("🚀 訂單塊大師 Bot - 最終穩定版 (ATR + 雙向保護)...")
-    timeframes = ['4h', '6h', '12h', '1d', '1w']   # 已移除不支援的 8h
+    print("🚀 訂單塊大師 Bot - 終極穩定版啟動...")
+    timeframes = ['4h', '6h', '12h', '1d', '1w']
     
     top_symbols = get_top_coins()
     print(f"熱門幣: {top_symbols[:8]}...")
@@ -146,20 +151,29 @@ if __name__ == "__main__":
        
         main_dir = "多" if direction_count.get("多", 0) >= direction_count.get("空", 0) else "空"
         latest = signals[-1]
-       
-        # === 最終強力檢查（防止 SOL 那種反向錯誤）===
+        
         entry = latest['entry']
         sl = latest['sl']
         tp1 = latest['tp1']
         
+        # === 終極方向檢查（防止 BTC/ETH 那種反向錯誤）===
+        is_valid = True
         if latest["direction"] == "多":
-            if sl >= entry or tp1 <= entry:
-                print(f"⚠️ {symbol} 多單訊號異常 (SL/TP 方向錯誤)，跳過")
-                continue
+            if sl >= entry * 0.98 or tp1 <= entry * 1.005:   # SL 必須明顯低於 entry，TP 必須明顯高於 entry
+                is_valid = False
         else:  # 空單
-            if sl <= entry or tp1 >= entry:
-                print(f"⚠️ {symbol} 空單訊號異常 (SL/TP 方向錯誤)，跳過")
-                continue
+            if sl <= entry * 1.02 or tp1 >= entry * 0.995:
+                is_valid = False
+        
+        if not is_valid:
+            print(f"⚠️ {symbol} {latest['direction']}單訊號異常 (SL/TP 方向錯誤)，已過濾")
+            continue
+        
+        # 額外風險距離檢查（避免 SL 過遠）
+        risk_pct = abs(entry - sl) / entry * 100
+        if risk_pct > 45:
+            print(f"⚠️ {symbol} 風險過高 ({risk_pct:.1f}%)，已過濾")
+            continue
         
         all_signals.append({
             "title": title,
