@@ -99,7 +99,7 @@ def get_top_coins(limit=10):
 
 if __name__ == "__main__":
     print("🚀 訂單塊大師 Bot - 修正版啟動 (ATR + 負價防護)...")
-    timeframes = ['4h', '8h', '12h', '1d', '1w']   # 把 1M 改成 1w 更穩定
+    timeframes = ['4h', '6h', '12h', '1d', '1w']   # 把 1M 改成 1w 更穩定
     top_symbols = get_top_coins()
     print(f"熱門幣: {top_symbols[:8]}...")
    
