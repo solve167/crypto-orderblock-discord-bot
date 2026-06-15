@@ -26,39 +26,36 @@ def calculate_atr(df, period=14):
     low_close = np.abs(df['low'] - df['close'].shift())
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     atr = tr.rolling(window=period).mean()
-    return float(atr.iloc[-1]) if not atr.empty else None
+    return float(atr.iloc[-1]) if not atr.empty else (df['close'].iloc[-1] * 0.018)
 
 def detect_orderblock(df):
     if df is None or len(df) < 70:
         return None
    
     current_price = float(df['close'].iloc[-1])
-    lookback = 22
+    lookback = 20
     atr = calculate_atr(df)
-    if atr is None or atr <= 0:
-        atr = current_price * 0.016
-   
+    
     recent_high = float(df['high'].iloc[-lookback:].max())
     recent_low = float(df['low'].iloc[-lookback:].min())
     mean_high = float(df['high'].iloc[-lookback:].mean())
     mean_low = float(df['low'].iloc[-lookback:].mean())
 
-    # === 平衡做多邏輯（保留結構要求但不過嚴）===
-    if (current_price > mean_low * 1.018 and
-        current_price > recent_low * 1.012 and
-        current_price < mean_high * 0.972 and   # 避免高位誤判
-        recent_low < mean_low * 0.99):
+    # === 趨勢判斷 + 做多 ===
+    if (current_price > mean_low * 1.015 and 
+        current_price > recent_low * 1.01 and 
+        df['close'].iloc[-5:].mean() > df['close'].iloc[-15:-5].mean()):  # 短期均價高於中期
         
         ob_low = recent_low
-        risk_dist = max((current_price - ob_low) * 1.08, atr * 1.7)
+        risk_dist = atr * 2.2  # 用 ATR 控制距離，更穩定
         
-        sl = round(ob_low * 0.965, 4)
+        sl = round(ob_low * 0.97, 4)
         tp1 = round(current_price + risk_dist * 0.618, 4)
         tp2 = round(current_price + risk_dist * 1.0, 4)
         tp3 = round(current_price + risk_dist * 1.618, 4)
         
-        # 立即方向驗證
-        if sl >= current_price * 0.985 or tp1 <= current_price * 1.008:
+        # 強制方向正確性檢查
+        if sl >= current_price or tp1 <= current_price:
             return None
             
         return {
@@ -70,21 +67,21 @@ def detect_orderblock(df):
             "tp3": tp3,
         }
     
-    # === 平衡做空邏輯 ===
-    elif (current_price < mean_high * 0.978 and
-          current_price < recent_high * 0.985 and
-          current_price > mean_low * 1.035):
+    # === 趨勢判斷 + 做空 ===
+    elif (current_price < mean_high * 0.985 and 
+          current_price < recent_high * 0.99 and 
+          df['close'].iloc[-5:].mean() < df['close'].iloc[-15:-5].mean()):  # 短期均價低於中期
         
         ob_high = recent_high
-        risk_dist = max((ob_high - current_price) * 1.08, atr * 1.7)
+        risk_dist = atr * 2.2
         
-        sl = round(ob_high * 1.035, 4)
+        sl = round(ob_high * 1.03, 4)
+        tp1 = round(current_price - risk_dist * 0.618, 4)
+        tp2 = round(current_price - risk_dist * 1.0, 4)
+        tp3 = round(current_price - risk_dist * 1.618, 4)
         
-        tp1 = max(current_price - risk_dist * 0.618, current_price * 0.85)
-        tp2 = max(current_price - risk_dist * 1.0, current_price * 0.68)
-        tp3 = max(current_price - risk_dist * 1.618, current_price * 0.48)
-        
-        if sl <= current_price * 1.015 or tp1 >= current_price * 0.985:
+        # 強制方向正確性檢查
+        if sl <= current_price or tp1 >= current_price:
             return None
             
         return {
@@ -106,7 +103,7 @@ def get_top_coins(limit=10):
         for symbol, info in tickers.items():
             if symbol.endswith('/USDT') and not symbol.startswith(('USDT','USDC')):
                 vol = info.get('quoteVolume') or info.get('volume') or 0
-                if vol > 14000000:
+                if vol > 13000000:
                     coins.append({'symbol': symbol, 'volume': vol})
         coins.sort(key=lambda x: x['volume'], reverse=True)
         return [c['symbol'] for c in coins[:limit]]
@@ -114,7 +111,7 @@ def get_top_coins(limit=10):
         return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'HYPE/USDT', 'DOGE/USDT', 'WLD/USDT']
 
 if __name__ == "__main__":
-    print("🚀 訂單塊大師 Bot - 平衡優化版啟動（訊號 + 防呆）...")
+    print("🚀 訂單塊大師 Bot - 方向絕對正確版啟動...")
     timeframes = ['4h', '6h', '12h', '1d', '1w']
     
     top_symbols = get_top_coins()
@@ -137,18 +134,17 @@ if __name__ == "__main__":
                 if signal:
                     signals.append(signal)
                     direction_count[signal["direction"]] += 1
-                    print(f" ✅ {symbol} {tf} → {signal['direction']} | Entry:{signal['entry']} SL:{signal['sl']} TP1:{signal['tp1']}")
+                    print(f" ✅ {symbol} {tf} → {signal['direction']} | E:{signal['entry']} SL:{signal['sl']} TP1:{signal['tp1']}")
             except Exception as e:
                 err_str = str(e)
                 if "bar error" in err_str or "Parameter" in err_str:
                     print(f"⚠️ {symbol} {tf} 不支援，跳過")
                 else:
-                    print(f"❌ {symbol} {tf} 抓取失敗: {err_str[:80]}")
+                    print(f"❌ {symbol} {tf} 抓取失敗")
                 continue
        
         max_count = max(direction_count.values()) if direction_count else 0
         if max_count < 3:
-            print(f"📉 {symbol} 僅 {max_count} TF 共振，跳過")
             continue
        
         title_map = {
@@ -161,23 +157,15 @@ if __name__ == "__main__":
         main_dir = "多" if direction_count.get("多", 0) >= direction_count.get("空", 0) else "空"
         latest = signals[-1]
         
+        # 最終確認方向正確
         entry = latest['entry']
         sl = latest['sl']
         tp1 = latest['tp1']
+        direction = latest['direction']
         
-        # === 最終把關 ===
-        is_valid = True
-        risk_pct = abs(entry - sl) / entry * 100
-        
-        if latest["direction"] == "多":
-            if sl >= entry * 0.985 or tp1 <= entry * 1.008 or risk_pct > 15:
-                is_valid = False
-        else:
-            if sl <= entry * 1.015 or tp1 >= entry * 0.985 or risk_pct > 15:
-                is_valid = False
-        
-        if not is_valid:
-            print(f"⚠️ {symbol} {latest['direction']}單異常 (方向/風險) 已過濾")
+        if (direction == "多" and (sl >= entry or tp1 <= entry)) or \
+           (direction == "空" and (sl <= entry or tp1 >= entry)):
+            print(f"⚠️ {symbol} 方向異常，已過濾")
             continue
         
         all_signals.append({
