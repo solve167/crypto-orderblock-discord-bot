@@ -29,36 +29,36 @@ def calculate_atr(df, period=14):
     return float(atr.iloc[-1]) if not atr.empty else None
 
 def detect_orderblock(df):
-    if df is None or len(df) < 80:   # 增加資料量要求
+    if df is None or len(df) < 70:
         return None
    
     current_price = float(df['close'].iloc[-1])
-    lookback = 24
+    lookback = 22
     atr = calculate_atr(df)
     if atr is None or atr <= 0:
-        atr = current_price * 0.015
-    
+        atr = current_price * 0.016
+   
     recent_high = float(df['high'].iloc[-lookback:].max())
     recent_low = float(df['low'].iloc[-lookback:].min())
     mean_high = float(df['high'].iloc[-lookback:].mean())
     mean_low = float(df['low'].iloc[-lookback:].mean())
 
-    # === 極嚴格做多邏輯（只有明顯支撐結構才觸發）===
-    if (current_price > mean_low * 1.028 and           # 明顯站上均低
-        current_price > recent_low * 1.022 and
-        current_price < mean_high * 0.955 and          # 遠離近期高點（避免高位）
-        recent_low < mean_low * 0.985):                # 有明顯低點支撐
+    # === 平衡做多邏輯（保留結構要求但不過嚴）===
+    if (current_price > mean_low * 1.018 and
+        current_price > recent_low * 1.012 and
+        current_price < mean_high * 0.972 and   # 避免高位誤判
+        recent_low < mean_low * 0.99):
         
         ob_low = recent_low
-        risk_dist = max((current_price - ob_low) * 1.06, atr * 1.6)
+        risk_dist = max((current_price - ob_low) * 1.08, atr * 1.7)
         
-        sl = round(ob_low * 0.962, 4)
+        sl = round(ob_low * 0.965, 4)
         tp1 = round(current_price + risk_dist * 0.618, 4)
-        tp2 = round(current_price + risk_dist * 1.00, 4)
+        tp2 = round(current_price + risk_dist * 1.0, 4)
         tp3 = round(current_price + risk_dist * 1.618, 4)
         
         # 立即方向驗證
-        if sl >= current_price * 0.99 or tp1 <= current_price * 1.01:
+        if sl >= current_price * 0.985 or tp1 <= current_price * 1.008:
             return None
             
         return {
@@ -70,23 +70,21 @@ def detect_orderblock(df):
             "tp3": tp3,
         }
     
-    # === 極嚴格做空邏輯 ===
-    elif (current_price < mean_high * 0.972 and 
-          current_price < recent_high * 0.982 and 
-          current_price > mean_low * 1.045 and
-          recent_high > mean_high * 0.995):
+    # === 平衡做空邏輯 ===
+    elif (current_price < mean_high * 0.978 and
+          current_price < recent_high * 0.985 and
+          current_price > mean_low * 1.035):
         
         ob_high = recent_high
-        risk_dist = max((ob_high - current_price) * 1.06, atr * 1.6)
+        risk_dist = max((ob_high - current_price) * 1.08, atr * 1.7)
         
-        sl = round(ob_high * 1.038, 4)
+        sl = round(ob_high * 1.035, 4)
         
-        tp1 = max(current_price - risk_dist * 0.618, current_price * 0.88)
-        tp2 = max(current_price - risk_dist * 1.0, current_price * 0.72)
-        tp3 = max(current_price - risk_dist * 1.618, current_price * 0.52)
+        tp1 = max(current_price - risk_dist * 0.618, current_price * 0.85)
+        tp2 = max(current_price - risk_dist * 1.0, current_price * 0.68)
+        tp3 = max(current_price - risk_dist * 1.618, current_price * 0.48)
         
-        # 立即方向驗證
-        if sl <= current_price * 1.01 or tp1 >= current_price * 0.99:
+        if sl <= current_price * 1.015 or tp1 >= current_price * 0.985:
             return None
             
         return {
@@ -108,7 +106,7 @@ def get_top_coins(limit=10):
         for symbol, info in tickers.items():
             if symbol.endswith('/USDT') and not symbol.startswith(('USDT','USDC')):
                 vol = info.get('quoteVolume') or info.get('volume') or 0
-                if vol > 15000000:
+                if vol > 14000000:
                     coins.append({'symbol': symbol, 'volume': vol})
         coins.sort(key=lambda x: x['volume'], reverse=True)
         return [c['symbol'] for c in coins[:limit]]
@@ -116,7 +114,7 @@ def get_top_coins(limit=10):
         return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'HYPE/USDT', 'DOGE/USDT', 'WLD/USDT']
 
 if __name__ == "__main__":
-    print("🚀 訂單塊大師 Bot - 嚴謹終極防呆版啟動...")
+    print("🚀 訂單塊大師 Bot - 平衡優化版啟動（訊號 + 防呆）...")
     timeframes = ['4h', '6h', '12h', '1d', '1w']
     
     top_symbols = get_top_coins()
@@ -131,7 +129,7 @@ if __name__ == "__main__":
         for tf in timeframes:
             try:
                 exchange = ccxt.okx({'enableRateLimit': True})
-                bars = exchange.fetch_ohlcv(symbol, tf, limit=600)
+                bars = exchange.fetch_ohlcv(symbol, tf, limit=500)
                 df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
                 
@@ -139,7 +137,7 @@ if __name__ == "__main__":
                 if signal:
                     signals.append(signal)
                     direction_count[signal["direction"]] += 1
-                    print(f" {symbol} {tf} → {signal['direction']}")
+                    print(f" ✅ {symbol} {tf} → {signal['direction']} | Entry:{signal['entry']} SL:{signal['sl']} TP1:{signal['tp1']}")
             except Exception as e:
                 err_str = str(e)
                 if "bar error" in err_str or "Parameter" in err_str:
@@ -150,6 +148,7 @@ if __name__ == "__main__":
        
         max_count = max(direction_count.values()) if direction_count else 0
         if max_count < 3:
+            print(f"📉 {symbol} 僅 {max_count} TF 共振，跳過")
             continue
        
         title_map = {
@@ -166,19 +165,19 @@ if __name__ == "__main__":
         sl = latest['sl']
         tp1 = latest['tp1']
         
-        # === 最終嚴格把關 ===
+        # === 最終把關 ===
         is_valid = True
         risk_pct = abs(entry - sl) / entry * 100
         
         if latest["direction"] == "多":
-            if sl >= entry * 0.99 or tp1 <= entry * 1.01 or risk_pct > 12:
+            if sl >= entry * 0.985 or tp1 <= entry * 1.008 or risk_pct > 15:
                 is_valid = False
         else:
-            if sl <= entry * 1.01 or tp1 >= entry * 0.99 or risk_pct > 12:
+            if sl <= entry * 1.015 or tp1 >= entry * 0.985 or risk_pct > 15:
                 is_valid = False
         
         if not is_valid:
-            print(f"⚠️ {symbol} {latest['direction']}單訊號異常 (SL/TP 方向或風險異常)，已過濾")
+            print(f"⚠️ {symbol} {latest['direction']}單異常 (方向/風險) 已過濾")
             continue
         
         all_signals.append({
