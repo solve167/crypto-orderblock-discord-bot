@@ -33,25 +33,26 @@ def detect_orderblock(df):
         return None
    
     current_price = float(df['close'].iloc[-1])
-    lookback = 22
+    lookback = 24
     atr = calculate_atr(df)
     if atr is None or atr <= 0:
-        atr = current_price * 0.02
+        atr = current_price * 0.018
     
     recent_high = float(df['high'].iloc[-lookback:].max())
     recent_low = float(df['low'].iloc[-lookback:].min())
     mean_high = float(df['high'].iloc[-lookback:].mean())
     mean_low = float(df['low'].iloc[-lookback:].mean())
 
-    # === 做多邏輯（大幅強化）===
-    if (current_price > mean_low * 1.018 and 
-        current_price > recent_low * 1.012 and 
-        current_price > mean_high * 0.985):  # 確保處於相對低位
+    # === 強化做多邏輯（必須明顯在支撐上方 + 結構健康）===
+    if (current_price > mean_low * 1.022 and          # 明顯高於近期均低
+        current_price > recent_low * 1.015 and 
+        current_price > mean_high * 0.965 and         # 不能太接近近期高點（避免高位假突破）
+        recent_low < mean_low * 1.01):                # 確保有明顯低點支撐
         
         ob_low = recent_low
-        risk_dist = max((current_price - ob_low) * 1.08, atr * 2.0)
+        risk_dist = max((current_price - ob_low) * 1.05, atr * 1.8)  # 收緊 risk
         
-        sl = round(ob_low * 0.965, 4)   # SL 在 OB 下方
+        sl = round(max(ob_low * 0.968, current_price * 0.92), 4)  # 強制 SL 不超過 8% 距離
         tp1 = round(current_price + risk_dist * 0.618, 4)
         tp2 = round(current_price + risk_dist * 1.0, 4)
         tp3 = round(current_price + risk_dist * 1.618, 4)
@@ -65,19 +66,20 @@ def detect_orderblock(df):
             "tp3": tp3,
         }
     
-    # === 做空邏輯（大幅強化）===
-    elif (current_price < mean_high * 0.982 and 
-          current_price < recent_high * 0.988 and 
-          current_price < mean_low * 1.015):
+    # === 強化做空邏輯 ===
+    elif (current_price < mean_high * 0.978 and 
+          current_price < recent_high * 0.985 and 
+          current_price < mean_low * 1.035 and
+          recent_high > mean_high * 0.99):
         
         ob_high = recent_high
-        risk_dist = max((ob_high - current_price) * 1.08, atr * 2.0)
+        risk_dist = max((ob_high - current_price) * 1.05, atr * 1.8)
         
-        sl = round(ob_high * 1.035, 4)   # SL 在 OB 上方
+        sl = round(min(ob_high * 1.032, current_price * 1.08), 4)   # 強制 SL 不超過 8%
         
-        tp1 = max(current_price - risk_dist * 0.618, current_price * 0.78)
-        tp2 = max(current_price - risk_dist * 1.0, current_price * 0.60)
-        tp3 = max(current_price - risk_dist * 1.618, current_price * 0.40)
+        tp1 = max(current_price - risk_dist * 0.618, current_price * 0.85)
+        tp2 = max(current_price - risk_dist * 1.0, current_price * 0.68)
+        tp3 = max(current_price - risk_dist * 1.618, current_price * 0.48)
         
         return {
             "direction": "空",
@@ -106,7 +108,7 @@ def get_top_coins(limit=10):
         return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'HYPE/USDT', 'DOGE/USDT', 'WLD/USDT']
 
 if __name__ == "__main__":
-    print("🚀 訂單塊大師 Bot - 終極穩定版啟動...")
+    print("🚀 訂單塊大師 Bot - 終極防呆版啟動...")
     timeframes = ['4h', '6h', '12h', '1d', '1w']
     
     top_symbols = get_top_coins()
@@ -156,23 +158,17 @@ if __name__ == "__main__":
         sl = latest['sl']
         tp1 = latest['tp1']
         
-        # === 終極方向檢查（防止 BTC/ETH 那種反向錯誤）===
+        # === 超強方向 + 風險檢查 ===
         is_valid = True
         if latest["direction"] == "多":
-            if sl >= entry * 0.98 or tp1 <= entry * 1.005:   # SL 必須明顯低於 entry，TP 必須明顯高於 entry
+            if sl >= entry * 0.985 or tp1 <= entry * 1.008 or (entry - sl) / entry > 0.12:
                 is_valid = False
-        else:  # 空單
-            if sl <= entry * 1.02 or tp1 >= entry * 0.995:
+        else:
+            if sl <= entry * 1.015 or tp1 >= entry * 0.992 or (sl - entry) / entry > 0.12:
                 is_valid = False
         
         if not is_valid:
-            print(f"⚠️ {symbol} {latest['direction']}單訊號異常 (SL/TP 方向錯誤)，已過濾")
-            continue
-        
-        # 額外風險距離檢查（避免 SL 過遠）
-        risk_pct = abs(entry - sl) / entry * 100
-        if risk_pct > 45:
-            print(f"⚠️ {symbol} 風險過高 ({risk_pct:.1f}%)，已過濾")
+            print(f"⚠️ {symbol} {latest['direction']}單訊號異常，已過濾")
             continue
         
         all_signals.append({
