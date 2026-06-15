@@ -35,26 +35,30 @@ def detect_orderblock(df):
     current_price = float(df['close'].iloc[-1])
     lookback = 20
     atr = calculate_atr(df)
-    
+   
     recent_high = float(df['high'].iloc[-lookback:].max())
     recent_low = float(df['low'].iloc[-lookback:].min())
     mean_high = float(df['high'].iloc[-lookback:].mean())
     mean_low = float(df['low'].iloc[-lookback:].mean())
 
-    # === 趨勢判斷 + 做多 ===
-    if (current_price > mean_low * 1.015 and 
-        current_price > recent_low * 1.01 and 
-        df['close'].iloc[-5:].mean() > df['close'].iloc[-15:-5].mean()):  # 短期均價高於中期
+    # === 做多邏輯（強制 OB 在下方）===
+    if (current_price > mean_low * 1.012 and 
+        current_price > recent_low * 1.008 and
+        recent_low < current_price * 0.985 and   # 關鍵：OB 必須明顯低於現價
+        df['close'].iloc[-5:].mean() > df['close'].iloc[-15:-5].mean()):
         
         ob_low = recent_low
-        risk_dist = atr * 2.2  # 用 ATR 控制距離，更穩定
+        risk_dist = current_price - ob_low   # 正向距離
         
-        sl = round(ob_low * 0.97, 4)
+        if risk_dist <= 0 or risk_dist > current_price * 0.15:  # 過大風險不取
+            return None
+        
+        sl = round(ob_low * 0.965, 4)   # 再往下一些
         tp1 = round(current_price + risk_dist * 0.618, 4)
         tp2 = round(current_price + risk_dist * 1.0, 4)
         tp3 = round(current_price + risk_dist * 1.618, 4)
         
-        # 強制方向正確性檢查
+        # 強制驗證
         if sl >= current_price or tp1 <= current_price:
             return None
             
@@ -67,20 +71,23 @@ def detect_orderblock(df):
             "tp3": tp3,
         }
     
-    # === 趨勢判斷 + 做空 ===
-    elif (current_price < mean_high * 0.985 and 
-          current_price < recent_high * 0.99 and 
-          df['close'].iloc[-5:].mean() < df['close'].iloc[-15:-5].mean()):  # 短期均價低於中期
+    # === 做空邏輯（強制 OB 在上方）===
+    elif (current_price < mean_high * 0.988 and 
+          current_price < recent_high * 0.992 and
+          recent_high > current_price * 1.015 and   # 關鍵：OB 必須明顯高於現價
+          df['close'].iloc[-5:].mean() < df['close'].iloc[-15:-5].mean()):
         
         ob_high = recent_high
-        risk_dist = atr * 2.2
+        risk_dist = ob_high - current_price
         
-        sl = round(ob_high * 1.03, 4)
+        if risk_dist <= 0 or risk_dist > current_price * 0.15:
+            return None
+        
+        sl = round(ob_high * 1.035, 4)
         tp1 = round(current_price - risk_dist * 0.618, 4)
         tp2 = round(current_price - risk_dist * 1.0, 4)
         tp3 = round(current_price - risk_dist * 1.618, 4)
         
-        # 強制方向正確性檢查
         if sl <= current_price or tp1 >= current_price:
             return None
             
@@ -111,7 +118,7 @@ def get_top_coins(limit=10):
         return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'HYPE/USDT', 'DOGE/USDT', 'WLD/USDT']
 
 if __name__ == "__main__":
-    print("🚀 訂單塊大師 Bot - 方向絕對正確版啟動...")
+    print("🚀 訂單塊大師 Bot - 方向永不錯誤終極版啟動...")
     timeframes = ['4h', '6h', '12h', '1d', '1w']
     
     top_symbols = get_top_coins()
@@ -157,12 +164,12 @@ if __name__ == "__main__":
         main_dir = "多" if direction_count.get("多", 0) >= direction_count.get("空", 0) else "空"
         latest = signals[-1]
         
-        # 最終確認方向正確
         entry = latest['entry']
         sl = latest['sl']
         tp1 = latest['tp1']
         direction = latest['direction']
         
+        # 最終鐵壁檢查
         if (direction == "多" and (sl >= entry or tp1 <= entry)) or \
            (direction == "空" and (sl <= entry or tp1 >= entry)):
             print(f"⚠️ {symbol} 方向異常，已過濾")
