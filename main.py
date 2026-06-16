@@ -2,6 +2,7 @@ import ccxt
 import pandas as pd
 import requests
 import os
+import time
 from datetime import datetime
 import numpy as np
 from dotenv import load_dotenv
@@ -41,46 +42,35 @@ def detect_orderblock(df):
     mean_high = float(df['high'].iloc[-lookback:].mean())
     mean_low = float(df['low'].iloc[-lookback:].mean())
 
-    # === 做多邏輯（強制 OB 在下方）===
+    # === 做多（嚴格 OB 在下方）===
     if (current_price > mean_low * 1.012 and 
         current_price > recent_low * 1.008 and
-        recent_low < current_price * 0.985 and   # 關鍵：OB 必須明顯低於現價
+        recent_low < current_price * 0.985 and
         df['close'].iloc[-5:].mean() > df['close'].iloc[-15:-5].mean()):
         
         ob_low = recent_low
-        risk_dist = current_price - ob_low   # 正向距離
-        
-        if risk_dist <= 0 or risk_dist > current_price * 0.15:  # 過大風險不取
+        risk_dist = current_price - ob_low
+        if risk_dist <= 0 or risk_dist > current_price * 0.18:
             return None
         
-        sl = round(ob_low * 0.965, 4)   # 再往下一些
+        sl = round(ob_low * 0.965, 4)
         tp1 = round(current_price + risk_dist * 0.618, 4)
         tp2 = round(current_price + risk_dist * 1.0, 4)
         tp3 = round(current_price + risk_dist * 1.618, 4)
         
-        # 強制驗證
         if sl >= current_price or tp1 <= current_price:
             return None
-            
-        return {
-            "direction": "多",
-            "entry": round(current_price, 4),
-            "sl": sl,
-            "tp1": tp1,
-            "tp2": tp2,
-            "tp3": tp3,
-        }
+        return {"direction": "多", "entry": round(current_price, 4), "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3}
     
-    # === 做空邏輯（強制 OB 在上方）===
+    # === 做空（嚴格 OB 在上方）===
     elif (current_price < mean_high * 0.988 and 
           current_price < recent_high * 0.992 and
-          recent_high > current_price * 1.015 and   # 關鍵：OB 必須明顯高於現價
+          recent_high > current_price * 1.015 and
           df['close'].iloc[-5:].mean() < df['close'].iloc[-15:-5].mean()):
         
         ob_high = recent_high
         risk_dist = ob_high - current_price
-        
-        if risk_dist <= 0 or risk_dist > current_price * 0.15:
+        if risk_dist <= 0 or risk_dist > current_price * 0.18:
             return None
         
         sl = round(ob_high * 1.035, 4)
@@ -90,15 +80,7 @@ def detect_orderblock(df):
         
         if sl <= current_price or tp1 >= current_price:
             return None
-            
-        return {
-            "direction": "空",
-            "entry": round(current_price, 4),
-            "sl": sl,
-            "tp1": round(tp1, 4),
-            "tp2": round(tp2, 4),
-            "tp3": round(tp3, 4),
-        }
+        return {"direction": "空", "entry": round(current_price, 4), "sl": sl, "tp1": round(tp1,4), "tp2": round(tp2,4), "tp3": round(tp3,4)}
     
     return None
 
@@ -117,10 +99,9 @@ def get_top_coins(limit=10):
     except:
         return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'HYPE/USDT', 'DOGE/USDT', 'WLD/USDT']
 
-if __name__ == "__main__":
-    print("🚀 訂單塊大師 Bot - 方向永不錯誤終極版啟動...")
+def run_analysis():
+    print(f"\n🚀 === 訂單塊大師 Bot 開始分析 - {datetime.now().strftime('%Y-%m-%d %H:%M')} ===")
     timeframes = ['4h', '6h', '12h', '1d', '1w']
-    
     top_symbols = get_top_coins()
     print(f"熱門幣: {top_symbols[:8]}...")
    
@@ -142,26 +123,17 @@ if __name__ == "__main__":
                     signals.append(signal)
                     direction_count[signal["direction"]] += 1
                     print(f" ✅ {symbol} {tf} → {signal['direction']} | E:{signal['entry']} SL:{signal['sl']} TP1:{signal['tp1']}")
-            except Exception as e:
-                err_str = str(e)
-                if "bar error" in err_str or "Parameter" in err_str:
-                    print(f"⚠️ {symbol} {tf} 不支援，跳過")
-                else:
-                    print(f"❌ {symbol} {tf} 抓取失敗")
+            except:
                 continue
        
         max_count = max(direction_count.values()) if direction_count else 0
         if max_count < 3:
             continue
        
-        title_map = {
-            5: "多他媽",
-            4: "多多" if direction_count.get("多", 0) >= 4 else "空空",
-            3: "可多" if direction_count.get("多", 0) == 3 else "可空"
-        }
+        title_map = {5: "多他媽", 4: "多多" if direction_count.get("多",0)>=4 else "空空", 3: "可多" if direction_count.get("多",0)==3 else "可空"}
         title = title_map.get(max_count, "可多")
        
-        main_dir = "多" if direction_count.get("多", 0) >= direction_count.get("空", 0) else "空"
+        main_dir = "多" if direction_count.get("多",0) >= direction_count.get("空",0) else "空"
         latest = signals[-1]
         
         entry = latest['entry']
@@ -169,23 +141,12 @@ if __name__ == "__main__":
         tp1 = latest['tp1']
         direction = latest['direction']
         
-        # 最終鐵壁檢查
-        if (direction == "多" and (sl >= entry or tp1 <= entry)) or \
-           (direction == "空" and (sl <= entry or tp1 >= entry)):
+        if (direction == "多" and (sl >= entry or tp1 <= entry)) or (direction == "空" and (sl <= entry or tp1 >= entry)):
             print(f"⚠️ {symbol} 方向異常，已過濾")
             continue
         
-        all_signals.append({
-            "title": title,
-            "symbol": symbol,
-            "direction": main_dir,
-            "count": max_count,
-            "entry": entry,
-            "sl": sl,
-            "tp1": tp1,
-            "tp2": latest['tp2'],
-            "tp3": latest['tp3']
-        })
+        all_signals.append({"title": title, "symbol": symbol, "direction": main_dir, "count": max_count,
+                            "entry": entry, "sl": sl, "tp1": tp1, "tp2": latest['tp2'], "tp3": latest['tp3']})
    
     all_signals.sort(key=lambda x: x['count'], reverse=True)
     top3 = all_signals[:3]
@@ -212,4 +173,11 @@ TP3: {sig['tp3']}
             send_to_discord(msg.strip())
             print(f"✅ 已發送 {sig['title']} {sig['symbol']}")
    
-    print("🎉 訂單塊大師 Bot 本輪分析完成！")
+    print("🎉 本輪分析完成！")
+
+if __name__ == "__main__":
+    print("🚀 訂單塊大師 Bot - 自動化每6小時運行版啟動...")
+    while True:
+        run_analysis()
+        print(f"⏳ 下次分析將在 6 小時後執行... ({datetime.now().strftime('%H:%M')})")
+        time.sleep(6 * 60 * 60)   # 每 6 小時執行一次
