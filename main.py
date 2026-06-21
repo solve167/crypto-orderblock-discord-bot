@@ -6,19 +6,19 @@ import time
 from datetime import datetime
 import numpy as np
 from dotenv import load_dotenv
-import signal
+import signal as signal_module  # ← 改名避免衝突
 import sys
 
 load_dotenv()
 
 # ====================== 配置 ======================
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
-TIMEFRAMES = ['4h', '1d', '1w']  # 先用主要 TF 提高效率
+TIMEFRAMES = ['4h', '1d', '1w']
 TOP_COINS_LIMIT = 8
-MIN_CONFLUENCE = 2  # 至少 2 個 TF 共振就發訊號（更靈敏）
-MAX_RUNTIME = 280  # 秒，防止 GitHub 超時
+MIN_CONFLUENCE = 2
+MAX_RUNTIME = 280  # 秒
 
-# ====================== Discord 推播 ======================
+# ====================== Discord ======================
 def send_to_discord(message: str):
     if not DISCORD_WEBHOOK_URL:
         print("⚠️ 未設定 DISCORD_WEBHOOK_URL")
@@ -32,7 +32,7 @@ def send_to_discord(message: str):
         print(f"❌ 推播失敗: {e}")
         return False
 
-# ====================== 技術指標 ======================
+# ====================== ATR ======================
 def calculate_atr(df, period=14):
     high_low = df['high'] - df['low']
     high_close = np.abs(df['high'] - df['close'].shift())
@@ -41,7 +41,7 @@ def calculate_atr(df, period=14):
     atr = tr.rolling(window=period).mean()
     return float(atr.iloc[-1]) if not atr.empty else (df['close'].iloc[-1] * 0.018)
 
-# ====================== 核心：訂單塊偵測（優化版） ======================
+# ====================== 訂單塊偵測 ======================
 def detect_orderblock(df):
     if df is None or len(df) < 100:
         return None
@@ -55,7 +55,7 @@ def detect_orderblock(df):
     mean_high = float(df['high'].iloc[-lookback:].mean())
     mean_low = float(df['low'].iloc[-lookback:].mean())
     
-    # === 做多 - 需求區（Order Block 在下方）===
+    # 做多 Order Block
     if (current_price > mean_low * 1.008 and 
         recent_low < current_price * 0.982 and
         df['close'].iloc[-8:].mean() > df['close'].iloc[-20:-8].mean()):
@@ -64,7 +64,7 @@ def detect_orderblock(df):
         if risk_dist <= atr * 0.8 or risk_dist > current_price * 0.15:
             return None
             
-        sl = round(recent_low - atr * 0.3, 4)  # 更貼近 ICT
+        sl = round(recent_low - atr * 0.3, 4)
         tp1 = round(current_price + risk_dist * 0.618, 4)
         tp2 = round(current_price + risk_dist * 1.0, 4)
         tp3 = round(current_price + risk_dist * 1.618, 4)
@@ -72,9 +72,9 @@ def detect_orderblock(df):
         if sl >= current_price or tp1 <= current_price:
             return None
         return {"direction": "多", "entry": round(current_price, 4), "sl": sl, 
-                "tp1": tp1, "tp2": tp2, "tp3": tp3, "strength": 3}
+                "tp1": tp1, "tp2": tp2, "tp3": tp3}
     
-    # === 做空 - 供給區（Order Block 在上方）===
+    # 做空 Order Block
     elif (current_price < mean_high * 0.992 and 
           recent_high > current_price * 1.018 and
           df['close'].iloc[-8:].mean() < df['close'].iloc[-20:-8].mean()):
@@ -91,11 +91,11 @@ def detect_orderblock(df):
         if sl <= current_price or tp1 >= current_price:
             return None
         return {"direction": "空", "entry": round(current_price, 4), "sl": sl, 
-                "tp1": tp1, "tp2": tp2, "tp3": tp3, "strength": 3}
+                "tp1": tp1, "tp2": tp2, "tp3": tp3}
     
     return None
 
-# ====================== 獲取熱門幣 ======================
+# ====================== 熱門幣 ======================
 def get_top_coins(limit=TOP_COINS_LIMIT):
     try:
         exchange = ccxt.okx({'enableRateLimit': True})
@@ -109,11 +109,11 @@ def get_top_coins(limit=TOP_COINS_LIMIT):
         coins.sort(key=lambda x: x['volume'], reverse=True)
         return [c['symbol'] for c in coins[:limit]]
     except:
-        return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT']
+        return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT']
 
-# ====================== 主分析函數 ======================
+# ====================== 主分析 ======================
 def run_analysis():
-    signal.alarm(MAX_RUNTIME)  # 超時保護
+    signal_module.alarm(MAX_RUNTIME)  # ← 使用 signal_module
     print(f"\n🚀 === 訂單塊大師 Bot 開始分析 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
     
     top_symbols = get_top_coins()
@@ -124,7 +124,6 @@ def run_analysis():
     for symbol in top_symbols:
         direction_count = {"多": 0, "空": 0}
         best_signal = None
-        best_strength = 0
         
         for tf in TIMEFRAMES:
             try:
@@ -132,25 +131,22 @@ def run_analysis():
                 bars = exchange.fetch_ohlcv(symbol, tf, limit=400)
                 df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 
-                signal = detect_orderblock(df)
-                if signal:
-                    direction_count[signal["direction"]] += 1
-                    print(f"✅ {symbol} {tf} → {signal['direction']} (強度: {signal.get('strength',1)})")
+                ob_signal = detect_orderblock(df)  # ← 改名 ob_signal
+                if ob_signal:
+                    direction_count[ob_signal["direction"]] += 1
+                    print(f"✅ {symbol} {tf} → {ob_signal['direction']}")
                     
-                    if signal.get('strength', 1) > best_strength:
-                        best_signal = signal
-                        best_strength = signal.get('strength', 1)
+                    if not best_signal:
+                        best_signal = ob_signal
             except Exception as e:
-                print(f"⚠️ {symbol} {tf} 錯誤: {e}")
+                print(f"⚠️ {symbol} {tf} 錯誤: {str(e)[:100]}")
                 continue
         
-        # 共振過濾
         max_count = max(direction_count.values()) if direction_count else 0
         if max_count < MIN_CONFLUENCE or not best_signal:
             continue
         
         main_dir = "多" if direction_count.get("多", 0) >= direction_count.get("空", 0) else "空"
-        
         title = "🔥 強勢共振" if max_count >= 3 else "⚡ 多TF共振"
         
         all_signals.append({
@@ -161,31 +157,30 @@ def run_analysis():
             **best_signal
         })
     
-    # 排序並取前3
     all_signals.sort(key=lambda x: x['count'], reverse=True)
     top_signals = all_signals[:3]
     
     if not top_signals:
-        send_to_discord("📉 本輪無足夠共振訂單塊訊號，市場正在盤整，耐心等待高機率 setup。")
+        send_to_discord("📉 本輪無足夠共振訂單塊訊號，市場盤整中，耐心等待。")
         print("📉 本輪無訊號")
     else:
         for sig in top_signals:
             msg = f"""
 🌟 **{sig['title']}** - {sig['symbol']}
 🕒 更新: {datetime.now().strftime('%Y/%m/%d %H:%M')}
-📊 **多時間框架共振**：{sig['count']}/{len(TIMEFRAMES)} 個 TF 同意 **{sig['direction']}**
-📍 **交易方向**：**{sig['direction']}**
-💰 **入場參考**：{sig['entry']}
-🛡️ **止損**：{sig['sl']} (貼近 ICT 結構)
-🎯 **止盈目標**
+📊 **共振**：{sig['count']}/{len(TIMEFRAMES)} TF 同意 **{sig['direction']}**
+📍 **方向**：**{sig['direction']}**
+💰 **入場**：{sig['entry']}
+🛡️ **止損**：{sig['sl']}
+🎯 **止盈**
 TP1: {sig['tp1']}
 TP2: {sig['tp2']}
 TP3: {sig['tp3']}
 
-⚠️ 僅供參考 • 嚴格執行風險管理 • 非投資建議
+⚠️ 僅供參考 • 嚴格風控 • 非投資建議
 """
             send_to_discord(msg.strip())
-            print(f"✅ 已發送 {sig['title']} {sig['symbol']}")
+            print(f"✅ 已發送 {sig['symbol']}")
     
     print("🎉 本輪分析完成！")
 
@@ -196,7 +191,7 @@ def timeout_handler(signum, frame):
 
 # ====================== 入口 ======================
 if __name__ == "__main__":
-    signal.signal(signal.SIGALRM, timeout_handler)
-    print("🚀 訂單塊大師 Bot - GitHub Actions 優化版啟動...")
+    signal_module.signal(signal_module.SIGALRM, timeout_handler)
+    print("🚀 訂單塊大師 Bot - GitHub Actions 優化版 v2 啟動...")
     run_analysis()
     print("🏁 程式正常結束")
